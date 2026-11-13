@@ -287,6 +287,9 @@ kbd { display: inline-grid; place-items: center; min-width: 15px; height: 15px; 
 .weapon-chip b { color: #c9a3ff; }
 .missile-chip b { color: #ffc078; }
 .laser-chip b { color: #ff9ae6; }
+.drone-chip b { color: #7ef9d0; }
+.overdrive-chip b { color: #ff9d5c; }
+.overdrive-chip { border-color: rgba(255, 157, 92, .35); box-shadow: 0 0 16px rgba(255, 157, 92, .12); }
 
 /* aviso central (nível / chefão) */
 .banner {

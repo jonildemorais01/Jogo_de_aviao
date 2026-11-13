@@ -27,21 +27,25 @@
   const bossTargetY = () => 130 + 88 * bossScale();
 
   const PICKUP_STYLE = {
-    life:    { color: '#62f0b5', label: '+', name: 'VIDA EXTRA' },
-    shield:  { color: '#5fdcff', label: '◇', name: 'ESCUDO' },
-    weapon:  { color: '#c38aff', label: 'W', name: 'ARMA +1' },
-    missile: { color: '#ffb457', label: 'M', name: 'MÍSSEIS' },
-    laser:   { color: '#ff6ad5', label: 'L', name: 'LASER' },
-    bomb:    { color: '#ffe066', label: 'B', name: 'BOMBA' },
+    life:      { color: '#62f0b5', label: '+', name: 'VIDA EXTRA' },
+    shield:    { color: '#5fdcff', label: '◇', name: 'ESCUDO' },
+    weapon:    { color: '#c38aff', label: 'W', name: 'TIRO +1' },
+    missile:   { color: '#ffb457', label: 'M', name: 'MÍSSEIS' },
+    laser:     { color: '#ff6ad5', label: 'L', name: 'LASER' },
+    bomb:      { color: '#ffe066', label: 'B', name: 'BOMBA +1' },
+    drone:     { color: '#7ef9d0', label: 'D', name: 'DRONE DE APOIO' },
+    overdrive: { color: '#ff9d5c', label: '⚡', name: 'SOBRECARGA' },
   };
 
+  // tiro principal em 3 níveis: 1 canhão -> 2 canhões -> 3 canhões em leque
   const WEAPON_PATTERNS = [
     [{ dx: 0, angle: 0 }],
-    [{ dx: -9, angle: 0 }, { dx: 9, angle: 0 }],
-    [{ dx: -13, angle: -0.11 }, { dx: 0, angle: 0 }, { dx: 13, angle: 0.11 }],
-    [{ dx: -17, angle: -0.19 }, { dx: -6, angle: -0.06 }, { dx: 6, angle: 0.06 }, { dx: 17, angle: 0.19 }],
+    [{ dx: -10, angle: -0.035 }, { dx: 10, angle: 0.035 }],
+    [{ dx: -16, angle: -0.17 }, { dx: 0, angle: 0 }, { dx: 16, angle: 0.17 }],
   ];
-  const WEAPON_COOLDOWN = [0, 0.195, 0.165, 0.145, 0.125];
+  const WEAPON_COOLDOWN = [0, 0.165, 0.135, 0.11];
+  const WEAPON_DAMAGE = [0, 1, 1.15, 1.5];
+  const WEAPON_RADIUS = [0, 3.6, 4.0, 4.6];
 
   const rand = (min, max) => min + Math.random() * (max - min);
   const clamp = (v, min, max) => (v < min ? min : v > max ? max : v);
@@ -62,6 +66,8 @@
     arsenal: $('arsenal'), weaponLevel: $('weapon-level'),
     missileChip: $('missile-chip'), missileCount: $('missile-count'),
     laserChip: $('laser-chip'), laserTime: $('laser-time'),
+    droneChip: $('drone-chip'), droneCount: $('drone-count'),
+    overdriveChip: $('overdrive-chip'), overdriveTime: $('overdrive-time'),
     bombCount: $('bomb-count'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
     killCount: $('final-kills'), bossCount: $('final-bosses'),
@@ -96,29 +102,200 @@
 
   /* ---------------- áudio ---------------- */
 
-  function beep(frequency, duration = 0.06, volume = 0.035, type = 'sine') {
-    if (!soundEnabled) return;
+  let audioCtx = null;
+  let musicGain = null;
+  let musicTimer = null;
+  let musicMood = 'calma';
+  let musicStep = 0;
+  let musicNextTime = 0;
+  let musicNoise = null;
+
+  function getAudio() {
+    if (!soundEnabled) return null;
     try {
       const AudioCtor = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtor) return;
-      if (!audio) audio = new AudioCtor();
-      if (audio.state === 'suspended') audio.resume().catch(() => {});
-      const osc = audio.createOscillator();
-      const gain = audio.createGain();
+      if (!AudioCtor) return null;
+      if (!audioCtx) audioCtx = new AudioCtor();
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+      return audioCtx;
+    } catch { return null; }
+  }
+
+  function beep(frequency, duration = 0.06, volume = 0.035, type = 'sine') {
+    const ac = getAudio();
+    if (!ac) return;
+    try {
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
       osc.type = type;
-      osc.frequency.setValueAtTime(frequency, audio.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * 0.7), audio.currentTime + duration);
-      gain.gain.setValueAtTime(volume, audio.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + duration);
-      osc.connect(gain).connect(audio.destination);
+      osc.frequency.setValueAtTime(frequency, ac.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(40, frequency * 0.7), ac.currentTime + duration);
+      gain.gain.setValueAtTime(volume, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + duration);
+      osc.connect(gain).connect(ac.destination);
       osc.start();
-      osc.stop(audio.currentTime + duration);
+      osc.stop(ac.currentTime + duration);
     } catch { /* áudio opcional */ }
   }
 
   function boom(volume = 0.07) {
     beep(90, 0.28, volume, 'sawtooth');
     beep(54, 0.42, volume * 0.7, 'triangle');
+  }
+
+  /* ---------------- trilha sonora adaptativa ----------------
+     Três climas: calma (menu e primeiros níveis), suspense (níveis
+     médios / pouca vida) e intensa (chefão / reta final).
+     Sintetizada na hora, sem arquivos de áudio. */
+
+  const MUSIC_MOODS = {
+    calma: {
+      bpm: 74, padVol: 0.028, bassVol: 0.040, arpVol: 0.020, hatVol: 0,
+      padWave: 'sine', arpWave: 'sine',
+      chords: [[0, 7, 12], [-3, 4, 9], [-5, 2, 7], [-7, 0, 5]],
+    },
+    suspense: {
+      bpm: 98, padVol: 0.030, bassVol: 0.048, arpVol: 0.026, hatVol: 0.006,
+      padWave: 'triangle', arpWave: 'triangle',
+      chords: [[0, 7, 10], [-1, 6, 11], [-3, 4, 9], [-5, 2, 7]],
+    },
+    intensa: {
+      bpm: 134, padVol: 0.026, bassVol: 0.055, arpVol: 0.030, hatVol: 0.018,
+      padWave: 'sawtooth', arpWave: 'square',
+      chords: [[0, 3, 7], [-2, 5, 10], [-4, 3, 8], [-5, 2, 7]],
+    },
+  };
+  const MUSIC_ROOT = 110;
+
+  function musicBus() {
+    const ac = getAudio();
+    if (!ac) return null;
+    if (!musicGain) {
+      musicGain = ac.createGain();
+      musicGain.gain.value = 0;
+      musicGain.connect(ac.destination);
+    }
+    return musicGain;
+  }
+
+  function musicNote(freq, time, dur, type, vol) {
+    const ac = getAudio();
+    const bus = musicBus();
+    if (!ac || !bus) return;
+    try {
+      const osc = ac.createOscillator();
+      const env = ac.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, time);
+      env.gain.setValueAtTime(0.0001, time);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), time + 0.03);
+      env.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+      osc.connect(env).connect(bus);
+      osc.start(time);
+      osc.stop(time + dur + 0.04);
+    } catch { /* ignora */ }
+  }
+
+  function musicHat(time, vol) {
+    const ac = getAudio();
+    const bus = musicBus();
+    if (!ac || !bus || vol <= 0) return;
+    try {
+      if (!musicNoise) {
+        const length = Math.floor(ac.sampleRate * 0.12);
+        musicNoise = ac.createBuffer(1, length, ac.sampleRate);
+        const data = musicNoise.getChannelData(0);
+        for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+      }
+      const src = ac.createBufferSource();
+      src.buffer = musicNoise;
+      const filter = ac.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 6200;
+      const env = ac.createGain();
+      env.gain.setValueAtTime(vol, time);
+      env.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+      src.connect(filter).connect(env).connect(bus);
+      src.start(time);
+      src.stop(time + 0.1);
+    } catch { /* ignora */ }
+  }
+
+  function musicScheduleStep(ac, mood, time, index, stepDuration) {
+    const chord = mood.chords[Math.floor(index / 16) % mood.chords.length];
+    const semitone = n => MUSIC_ROOT * Math.pow(2, n / 12);
+
+    // baixo
+    if (index % 4 === 0 || index === 6 || index === 11 || index === 14) {
+      musicNote(semitone(chord[0] - 12), time, stepDuration * 1.8, 'triangle', mood.bassVol);
+    }
+    // acorde (pad) no começo de cada compasso
+    if (index % 16 === 0) {
+      for (const note of chord) {
+        musicNote(semitone(note), time, stepDuration * 15, mood.padWave, mood.padVol);
+      }
+    }
+    // arpejo
+    if (index % 2 === 0) {
+      const arpIndex = (index / 2) % chord.length;
+      musicNote(semitone(chord[arpIndex] + 12), time, stepDuration * 1.4, mood.arpWave, mood.arpVol);
+    }
+    // percussão
+    if (index % 8 === 4) musicHat(time, mood.hatVol);
+    if (mood.hatVol > 0 && index % 4 === 2) musicHat(time, mood.hatVol * 0.5);
+    void ac;
+  }
+
+  function musicTick() {
+    const ac = getAudio();
+    if (!ac) return;
+    const mood = MUSIC_MOODS[musicMood] || MUSIC_MOODS.calma;
+    const stepDuration = 60 / mood.bpm / 4;
+    if (musicNextTime < ac.currentTime) musicNextTime = ac.currentTime + 0.05;
+    let guard = 0;
+    while (musicNextTime < ac.currentTime + 0.35 && guard < 64) {
+      musicScheduleStep(ac, mood, musicNextTime, musicStep % 32, stepDuration);
+      musicNextTime += stepDuration;
+      musicStep++;
+      guard++;
+    }
+  }
+
+  function musicStart() {
+    const ac = getAudio();
+    const bus = musicBus();
+    if (!ac || !bus) return;
+    bus.gain.cancelScheduledValues(ac.currentTime);
+    bus.gain.setTargetAtTime(0.65, ac.currentTime, 0.8);
+    if (!musicTimer) {
+      musicNextTime = ac.currentTime + 0.1;
+      musicTimer = setInterval(musicTick, 120);
+    }
+  }
+
+  function musicStop(fade = 0.5) {
+    const ac = getAudio();
+    if (musicGain && ac) {
+      musicGain.gain.cancelScheduledValues(ac.currentTime);
+      musicGain.gain.setTargetAtTime(0.0001, ac.currentTime, fade);
+    }
+    if (musicTimer) {
+      clearInterval(musicTimer);
+      musicTimer = null;
+    }
+  }
+
+  function musicSetMood(mood) {
+    if (MUSIC_MOODS[mood] && mood !== musicMood) {
+      musicMood = mood;
+      musicStart();
+    }
+  }
+
+  function musicDuck(quiet) {
+    const ac = getAudio();
+    if (!ac || !musicGain) return;
+    musicGain.gain.setTargetAtTime(quiet ? 0.15 : 0.65, ac.currentTime, 0.25);
   }
 
   /* ---------------- mundo ---------------- */
@@ -148,7 +325,8 @@
       difficulty,
       player: {
         x: W / 2, y: H - 82, cooldown: 0, invincible: 0, shield: 0,
-        weapon: 1, missiles: 0, missileCd: 0, laser: 0, laserTick: 0, bombs: 1,
+        weapon: 1, missiles: 0, missileCd: 0, laser: 0, laserTick: 0, bombs: 2,
+        drones: 0, droneCd: 0, overdrive: 0,
         bank: 0, engine: 0,
       },
       bullets: [], missiles: [], enemyMissiles: [], enemies: [], pickups: [],
@@ -258,6 +436,14 @@
       ui.laserChip.hidden = game.player.laser <= 0;
       if (ui.laserTime) ui.laserTime.textContent = `${Math.ceil(game.player.laser)}s`;
     }
+    if (ui.droneChip) {
+      ui.droneChip.hidden = game.player.drones <= 0;
+      if (ui.droneCount) ui.droneCount.textContent = `×${game.player.drones}`;
+    }
+    if (ui.overdriveChip) {
+      ui.overdriveChip.hidden = game.player.overdrive <= 0;
+      if (ui.overdriveTime) ui.overdriveTime.textContent = `${Math.ceil(game.player.overdrive)}s`;
+    }
     if (lastBombs !== game.player.bombs && ui.bombCount) {
       ui.bombCount.textContent = game.player.bombs;
       lastBombs = game.player.bombs;
@@ -326,6 +512,10 @@
 
   function changeStatus(status) {
     game.status = status;
+    if (status === 'paused') musicDuck(true);
+    else if (status === 'playing') musicDuck(false);
+    else if (status === 'menu') { musicSetMood('calma'); musicDuck(false); }
+    else if (status === 'over') musicStop(0.9);
     game.keys.clear();
     game.pointer.active = false;
     syncScreens();
@@ -346,6 +536,8 @@
     syncScreens();
     canvas.focus();
     announce('NÍVEL 1', 'BOA SORTE, PILOTO');
+    musicSetMood('calma');
+    musicStart();
     beep(520, 0.12, 0.05, 'triangle');
   }
 
@@ -428,18 +620,33 @@
 
   function firePrimary() {
     const p = game.player;
-    const pattern = WEAPON_PATTERNS[clamp(p.weapon, 1, 4) - 1];
-    const speed = 640;
+    const level = clamp(p.weapon, 1, 3);
+    const pattern = WEAPON_PATTERNS[level - 1];
+    const boost = p.overdrive > 0 ? 1.6 : 1;
+    const speed = 620 + level * 30;
     for (const shot of pattern) {
       game.bullets.push({
         x: p.x + shot.dx, y: p.y - 26,
         vx: Math.sin(shot.angle) * speed,
         vy: -Math.cos(shot.angle) * speed,
-        radius: 3.6, damage: 1, enemy: false, life: 2,
+        radius: WEAPON_RADIUS[level] + (p.overdrive > 0 ? 0.9 : 0),
+        damage: WEAPON_DAMAGE[level] * (p.overdrive > 0 ? 1.25 : 1),
+        enemy: false, life: 2, power: level,
       });
     }
-    p.cooldown = WEAPON_COOLDOWN[clamp(p.weapon, 1, 4)];
-    beep(p.weapon > 2 ? 760 : 640, 0.035, 0.016, 'square');
+    p.cooldown = WEAPON_COOLDOWN[level] / boost;
+    beep(660 + level * 70, 0.035, 0.016, 'square');
+  }
+
+  function fireDrone(drone) {
+    const p = game.player;
+    const speed = 700;
+    game.bullets.push({
+      x: drone.x, y: drone.y - 8, vx: 0, vy: -speed,
+      radius: 3, damage: 0.8, enemy: false, life: 2, power: 2, drone: true,
+    });
+    beep(980, 0.028, 0.010, 'triangle');
+    void p;
   }
 
   function nearestEnemyTarget(from) {
@@ -556,31 +763,35 @@
     explode(enemy.x, enemy.y, enemy.kind === 'heavy' ? '#ffad66' : '#ff6685', enemy.kind === 'heavy' ? 2 : 1);
     beep(enemy.kind === 'heavy' ? 120 : 190, 0.09, 0.035, 'triangle');
     if (chain && game.combo >= 3) floatText(enemy.x, enemy.y - 12, `+${numberFormat.format(points)}`, '#ffd076');
-    dropPickup(enemy.x, enemy.y, enemy.kind === 'heavy' ? 0.34 : 0.1);
+    dropPickup(enemy.x, enemy.y, enemy.kind === 'heavy' ? 0.52 : 0.17);
   }
 
   function dropPickup(x, y, chance) {
     if (Math.random() > chance) return;
     const roll = Math.random();
     let kind;
-    if (roll < 0.10) kind = 'life';
-    else if (roll < 0.30) kind = 'weapon';
-    else if (roll < 0.48) kind = 'shield';
-    else if (roll < 0.64) kind = 'missile';
-    else if (roll < 0.82) kind = 'laser';
-    else kind = 'bomb';
+    if (roll < 0.13) kind = 'life';          // vidas extras: presentes, mas raras
+    else if (roll < 0.29) kind = 'weapon';
+    else if (roll < 0.41) kind = 'shield';
+    else if (roll < 0.55) kind = 'missile';
+    else if (roll < 0.67) kind = 'laser';
+    else if (roll < 0.83) kind = 'bomb';     // bombas ficaram bem mais frequentes
+    else if (roll < 0.93) kind = 'drone';
+    else kind = 'overdrive';
     game.pickups.push({ x, y, kind, spin: 0, life: 12 });
   }
 
   function collectPickup(pickup) {
     const p = game.player;
     const style = PICKUP_STYLE[pickup.kind];
-    if (pickup.kind === 'life') game.lives = Math.min(6, game.lives + 1);
+    if (pickup.kind === 'life') game.lives = Math.min(7, game.lives + 1);
     if (pickup.kind === 'shield') p.shield = 1;
-    if (pickup.kind === 'weapon') p.weapon = Math.min(4, p.weapon + 1);
-    if (pickup.kind === 'missile') p.missiles = Math.min(18, p.missiles + 9);
-    if (pickup.kind === 'laser') p.laser = Math.min(14, p.laser + 7);
-    if (pickup.kind === 'bomb') p.bombs = Math.min(5, p.bombs + 1);
+    if (pickup.kind === 'weapon') p.weapon = Math.min(3, p.weapon + 1);
+    if (pickup.kind === 'missile') p.missiles = Math.min(24, p.missiles + 9);
+    if (pickup.kind === 'laser') p.laser = Math.min(16, p.laser + 7);
+    if (pickup.kind === 'bomb') p.bombs = Math.min(6, p.bombs + 1);
+    if (pickup.kind === 'drone') p.drones = Math.min(2, p.drones + 1);
+    if (pickup.kind === 'overdrive') p.overdrive = Math.min(12, p.overdrive + 6);
     game.score += 60;
     beep(880, 0.16, 0.045, 'sine');
     explode(pickup.x, pickup.y, style.color, 0.6);
@@ -660,10 +871,11 @@
     game.flash = 0.6;
     boom(0.11);
     floatText(boss.x, boss.y, `+${numberFormat.format(bonus)}`, '#ffe066');
-    for (let i = 0; i < 3; i++) {
+    const bossLoot = ['bomb', 'weapon', 'drone', 'life', 'overdrive'];
+    for (let i = 0; i < bossLoot.length; i++) {
       game.pickups.push({
-        x: boss.x + rand(-70, 70), y: boss.y + rand(-30, 30),
-        kind: ['weapon', 'missile', 'bomb', 'shield'][i % 4], spin: 0, life: 16,
+        x: boss.x + rand(-80, 80), y: boss.y + rand(-36, 36),
+        kind: bossLoot[i], spin: 0, life: 18,
       });
     }
     game.boss = null;
@@ -765,7 +977,7 @@
     boss.sway += dt;
     boss.x = W / 2 + Math.sin(boss.sway * 0.75) * Math.max(70, W * 0.19 - boss.phase * 12);
     boss.y = boss.targetY + Math.sin(boss.sway * 1.6) * 12;
-    boss.flash = Math.max(0, boss.flash - dt * 3);
+    boss.flash = Math.max(0, boss.flash - dt * 4.5);
     boss.timer += dt;
 
     // rastro de energia do chefão
@@ -867,6 +1079,19 @@
 
     // mísseis teleguiados
     if (p.missiles > 0 && p.missileCd <= 0) fireMissile();
+
+    // drones de apoio (escolta)
+    p.overdrive = Math.max(0, p.overdrive - dt);
+    if (p.drones > 0) {
+      p.droneCd -= dt;
+      if (p.droneCd <= 0) {
+        for (let i = 0; i < p.drones; i++) {
+          const side = p.drones === 1 ? -1 : i === 0 ? -1 : 1;
+          fireDrone({ x: p.x + side * 36, y: p.y + 16 + Math.sin(p.engine * 3 + i) * 3 });
+        }
+        p.droneCd = p.overdrive > 0 ? 0.3 : 0.44;
+      }
+    }
 
     // laser contínuo
     if (p.laser > 0) {
@@ -1003,6 +1228,11 @@
     game.particles = game.particles.filter(pt => pt.life > 0);
     game.rings = game.rings.filter(r => r.life > 0);
     game.texts = game.texts.filter(t => t.life > 0);
+
+    let mood = 'calma';
+    if (game.level >= 5 || game.lives <= 1) mood = 'suspense';
+    if (game.boss || game.level >= 9) mood = 'intensa';
+    musicSetMood(mood);
 
     if (game.statsClock > 0.08) { game.statsClock = 0; syncHud(); }
   }
@@ -1215,7 +1445,7 @@
     ctx.fill();
 
     // canhões conforme nível de arma
-    const pods = clamp(p.weapon, 1, 4);
+    const pods = clamp(p.weapon, 1, 3);
     ctx.fillStyle = '#9ef3ff';
     for (let i = 0; i < pods; i++) {
       const side = i % 2 === 0 ? 1 : -1;
@@ -1232,7 +1462,46 @@
       ctx.arc(0, 0, 42, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (p.overdrive > 0) {
+      ctx.strokeStyle = `rgba(255,157,92,${0.35 + Math.sin(time * 14) * 0.2})`;
+      ctx.lineWidth = 2.5;
+      ctx.shadowColor = '#ff9d5c';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(0, 0, 34, time * 3, time * 3 + Math.PI * 1.3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, 34, time * 3 + Math.PI, time * 3 + Math.PI * 2.3);
+      ctx.stroke();
+    }
     ctx.restore();
+
+    // drones de apoio
+    if (p.drones > 0) {
+      for (let i = 0; i < p.drones; i++) {
+        const side = p.drones === 1 ? -1 : i === 0 ? -1 : 1;
+        const dx = p.x + side * 36;
+        const dy = p.y + 16 + Math.sin(p.engine * 3 + i) * 3;
+        ctx.save();
+        ctx.translate(dx, dy);
+        ctx.shadowColor = '#7ef9d0';
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = '#7ef9d0';
+        ctx.beginPath();
+        ctx.moveTo(0, -11);
+        ctx.lineTo(9, 4);
+        ctx.lineTo(3, 2);
+        ctx.lineTo(0, 8);
+        ctx.lineTo(-3, 2);
+        ctx.lineTo(-9, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillRect(-1.5, -4, 3, 5);
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+    }
 
     // laser ativo
     if (p.laser > 0) {
@@ -1334,15 +1603,15 @@
     ctx.fill();
 
     ctx.shadowColor = boss.color;
-    ctx.shadowBlur = 26;
-    ctx.fillStyle = hurt ? '#ffffff' : boss.color;
+    ctx.shadowBlur = hurt ? 40 : 26;
+    ctx.fillStyle = boss.color;
 
     if (boss.variant === 0) {
       // CRUZADOR FERRO — casco hexagonal largo
       const hull = ctx.createLinearGradient(-r, -r * 0.7, r, r * 0.85);
-      hull.addColorStop(0, hurt ? '#ffffff' : '#ffb27a');
-      hull.addColorStop(0.5, hurt ? '#ffffff' : boss.color);
-      hull.addColorStop(1, hurt ? '#ffffff' : '#a8441f');
+      hull.addColorStop(0, '#ffb27a');
+      hull.addColorStop(0.5, boss.color);
+      hull.addColorStop(1, '#a8441f');
       ctx.fillStyle = hull;
       ctx.beginPath();
       ctx.moveTo(0, r * 0.85);
@@ -1433,6 +1702,18 @@
       ctx.stroke();
     }
 
+    // clarão curto ao levar dano (mantém a identidade do chefão)
+    if (hurt) {
+      const flashGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.05);
+      flashGrad.addColorStop(0, `rgba(255,255,255,${Math.min(0.55, boss.flash)})`);
+      flashGrad.addColorStop(0.7, `rgba(255,255,255,${Math.min(0.22, boss.flash * 0.4)})`);
+      flashGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = flashGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // núcleo pulsante
     const pulse = 0.65 + Math.sin(time * 6) * 0.25;
     const core = ctx.createRadialGradient(0, 0, 2, 0, 0, r * 0.42);
@@ -1497,16 +1778,20 @@
         ctx.arc(bullet.x, bullet.y, bullet.radius * 2.2, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        ctx.strokeStyle = '#9df3ff';
-        ctx.shadowColor = '#38d9ff';
-        ctx.shadowBlur = 14;
-        ctx.lineWidth = 4;
+        const colors = ['#9df3ff', '#7fe9ff', '#b6a2ff'];
+        const power = clamp(bullet.power || 1, 1, 3);
+        const core = bullet.drone ? '#a9fff0' : colors[power - 1];
+        const glow = bullet.drone ? '#2ef0c8' : power === 3 ? '#7b6bff' : '#38d9ff';
+        ctx.strokeStyle = core;
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = bullet.drone ? 9 : 12 + power * 3;
+        ctx.lineWidth = bullet.drone ? 2.4 : 3 + power;
         ctx.beginPath();
         ctx.moveTo(bullet.x, bullet.y);
         ctx.lineTo(bullet.x - bullet.vx * 0.022, bullet.y - bullet.vy * 0.022);
         ctx.stroke();
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+        ctx.lineWidth = bullet.drone ? 1.1 : 1.6;
         ctx.beginPath();
         ctx.moveTo(bullet.x, bullet.y);
         ctx.lineTo(bullet.x - bullet.vx * 0.014, bullet.y - bullet.vy * 0.014);
@@ -1735,7 +2020,7 @@
           ? 'M15 8.5a5 5 0 0 1 0 7m2.5-9.5a8.5 8.5 0 0 1 0 12'
           : 'm16 9 5 6m0-6-5 6');
       }
-      if (soundEnabled) beep(600);
+      if (soundEnabled) { beep(600); musicStart(); } else { musicStop(0.15); }
     });
   }
 
@@ -1776,11 +2061,20 @@
       return true;
     },
     giveWeapons: () => {
-      game.player.weapon = 4;
+      game.player.weapon = 3;
       game.player.missiles = 18;
       game.player.laser = 10;
-      game.player.bombs = 3;
+      game.player.bombs = 4;
+      game.player.drones = 2;
+      game.player.overdrive = 8;
       syncHud();
+    },
+    givePickup: (kind, x, y) => {
+      game.pickups.push({
+        x: typeof x === 'number' ? x : game.player.x,
+        y: typeof y === 'number' ? y : game.player.y - 14,
+        kind, spin: 0, life: 30,
+      });
     },
   };
 
