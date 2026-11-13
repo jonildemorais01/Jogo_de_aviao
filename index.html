@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Pilote seu avião, desvie dos inimigos e domine os céus neste jogo arcade para navegador.">
+  <title>Skyforce — Jogo de Avião</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page">
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <section class="game-container" aria-label="Jogo Skyforce">
+      <header class="topbar">
+        <a class="brand" id="brand" href="#" aria-label="Skyforce, início">
+          <span class="brand-icon">
+            <svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21.4 3.1c-.5-.5-1.3-.6-2-.3L3.4 9.5c-.8.3-1.1 1.1-.8 1.8.2.5.6.8 1.1.9l6.6 1.4 1.4 6.6c.2.9 1.1 1.4 2 1 .3-.2.6-.4.7-.8l7.2-15c.2-.5.1-1-.2-1.3Z" fill="currentColor"/><path d="m10.3 13.6 4.6-4.7-3.5 5.9-.2 2.6-.9-3.7Z" fill="#071426"/></svg>
+          </span>
+          <span>SKY<span>FORCE</span></span>
+        </a>
+        <div class="top-actions">
+          <span class="online"><i></i> MODO ARCADE</span>
+          <button class="icon-button" id="sound-button" aria-label="Desativar som" title="Desativar som">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path id="sound-waves" d="M15 8.5a5 5 0 0 1 0 7m2.5-9.5a8.5 8.5 0 0 1 0 12"/></svg>
+          </button>
+          <button class="icon-button" id="pause-button" aria-label="Pausar" title="Pausar (P)" hidden></button>
+        </div>
+      </header>
+
+      <div class="game-frame" id="game-frame">
+        <canvas id="game-canvas" width="960" height="600" tabindex="0" aria-label="Área do jogo Skyforce. Use WASD ou as setas para pilotar."></canvas>
+        <div class="scanlines"></div>
+
+        <div id="game-hud" hidden>
+          <div class="hud">
+            <div class="hud-block lives-block"><span class="hud-label">VIDAS</span><div class="lives" id="lives"></div></div>
+            <div class="hud-block score-block"><span class="hud-label">PONTUAÇÃO</span><strong id="score">0</strong><span class="combo" id="combo" hidden></span></div>
+            <div class="hud-block level-block"><span class="hud-label">NÍVEL</span><strong id="level">01</strong></div>
+          </div>
+          <div class="shield-badge" id="shield" hidden>◈ ESCUDO ATIVO</div>
+          <div class="desktop-hint"><span>WASD</span> ou <span>SETAS</span> para pilotar <i></i> tiro automático</div>
+          <div class="mobile-hint">Arraste na tela para pilotar</div>
+        </div>
+
+        <div class="overlay menu-overlay" id="menu-screen">
+          <div class="menu-content">
+            <div class="eyebrow"><span></span> MISSÃO PRONTA, PILOTO <span></span></div>
+            <h1>DOMINE OS <em>CÉUS</em></h1>
+            <p class="intro">Desvie dos inimigos, destrua esquadrões e alcance a maior pontuação.</p>
+            <div class="difficulty-title"><span>ESCOLHA SUA DIFICULDADE</span><i></i></div>
+            <div class="difficulty-grid">
+              <button class="difficulty-card" data-difficulty="facil" style="--accent:#45e6b5" aria-pressed="false">
+                <span class="difficulty-check"></span><span class="difficulty-name">Fácil</span>
+                <span class="difficulty-description">Ritmo tranquilo para aprender</span>
+                <span class="difficulty-lives">♥♥♥♥♥ <small>5 vidas</small></span>
+                <span class="card-best" data-record="facil" hidden></span>
+              </button>
+              <button class="difficulty-card selected" data-difficulty="medio" style="--accent:#62b5ff" aria-pressed="true">
+                <span class="difficulty-check">✓</span><span class="difficulty-name">Médio</span>
+                <span class="difficulty-description">Equilíbrio entre ação e desafio</span>
+                <span class="difficulty-lives">♥♥♥ <small>3 vidas</small></span>
+                <span class="card-best" data-record="medio" hidden></span>
+              </button>
+              <button class="difficulty-card" data-difficulty="dificil" style="--accent:#ff6685" aria-pressed="false">
+                <span class="difficulty-check"></span><span class="difficulty-name">Difícil</span>
+                <span class="difficulty-description">Rápido, intenso e sem piedade</span>
+                <span class="difficulty-lives">♥♥ <small>2 vidas</small></span>
+                <span class="card-best" data-record="dificil" hidden></span>
+              </button>
+            </div>
+            <button class="primary-button" id="start-button">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21.4 3.1c-.5-.5-1.3-.6-2-.3L3.4 9.5c-.8.3-1.1 1.1-.8 1.8.2.5.6.8 1.1.9l6.6 1.4 1.4 6.6c.2.9 1.1 1.4 2 1 .3-.2.6-.4.7-.8l7.2-15c.2-.5.1-1-.2-1.3Z" fill="currentColor"/></svg>
+              INICIAR MISSÃO <span>→</span>
+            </button>
+            <div class="quick-controls"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> para mover</span><i></i><span>◉ Tiro automático</span><i></i><span><kbd>P</kbd> para pausar</span></div>
+          </div>
+        </div>
+
+        <div class="overlay modal-overlay" id="pause-screen" hidden>
+          <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+            <span class="modal-icon">Ⅱ</span><span class="eyebrow">MISSÃO EM ESPERA</span>
+            <h2 id="pause-title">Jogo pausado</h2><p>Respire, piloto. Os céus esperam por você.</p>
+            <button class="primary-button" id="resume-button">CONTINUAR MISSÃO <span>→</span></button>
+            <button class="text-button" data-menu>Voltar ao início</button>
+          </div>
+        </div>
+
+        <div class="overlay modal-overlay" id="gameover-screen" hidden>
+          <div class="modal-card gameover-card" role="dialog" aria-modal="true" aria-labelledby="gameover-title">
+            <span class="eyebrow danger">FIM DA MISSÃO</span><h2 id="gameover-title">Bom voo, piloto!</h2>
+            <p>Você pilotou no modo <strong id="final-difficulty">médio</strong></p>
+            <div class="result-score"><span>PONTUAÇÃO FINAL</span><strong id="final-score">0</strong><small id="new-record" hidden>★ NOVO RECORDE</small></div>
+            <div class="result-info"><span>Nível alcançado <strong id="final-level">1</strong></span><span>Recorde <strong id="best-score">0</strong></span></div>
+            <button class="primary-button" id="restart-button">↻ &nbsp; JOGAR NOVAMENTE</button>
+            <button class="text-button" data-menu>Escolher outra dificuldade</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="footer"><span><i class="cyan-dot"></i> Colete <b>+</b> vidas, <b>◈</b> escudos e <b>3×</b> tiro triplo</span><span>DESTRUA. DESVIE. SOBREVIVA.</span></footer>
+    </section>
+  </main>
+  <noscript>Ative o JavaScript do navegador para jogar Skyforce.</noscript>
+  <script src="game.js"></script>
+</body>
+</html>
