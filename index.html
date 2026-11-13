@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#07111f">
-  <meta name="description" content="Pilote seu avião, desvie dos inimigos e domine os céus neste jogo arcade para navegador.">
+  <meta name="description" content="Pilote seu avião, desvie dos inimigos, destrua chefões e domine os céus neste jogo arcade para navegador.">
   <title>Skyforce — Jogo de Avião</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -22,6 +22,10 @@
         </a>
         <div class="top-actions">
           <span class="online"><i></i> MODO ARCADE</span>
+          <button class="icon-button" id="bomb-button" aria-label="Soltar bomba (B)" title="Bomba (B)" hidden>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="14" r="6.5"/><path d="M11 7.5V4m0 0h3m-3 0H9m8 3 1.8-1.8"/></svg>
+            <span class="bomb-count" id="bomb-count">0</span>
+          </button>
           <button class="icon-button" id="sound-button" aria-label="Desativar som" title="Desativar som">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path id="sound-waves" d="M15 8.5a5 5 0 0 1 0 7m2.5-9.5a8.5 8.5 0 0 1 0 12"/></svg>
           </button>
@@ -39,16 +43,33 @@
             <div class="hud-block score-block"><span class="hud-label">PONTUAÇÃO</span><strong id="score">0</strong><span class="combo" id="combo" hidden></span></div>
             <div class="hud-block level-block"><span class="hud-label">NÍVEL</span><strong id="level">01</strong></div>
           </div>
+
+          <div class="boss-hud" id="boss-hud" hidden>
+            <div class="boss-top"><span class="boss-tag">◆ CHEFÃO</span><strong id="boss-name">—</strong></div>
+            <div class="boss-bar"><i id="boss-fill"></i></div>
+          </div>
+
+          <div class="arsenal" id="arsenal">
+            <div class="arsenal-chip weapon-chip"><span>ARMA</span><b id="weapon-level">Nv.1</b></div>
+            <div class="arsenal-chip missile-chip" id="missile-chip" hidden><span>MÍSSEIS</span><b id="missile-count">0</b></div>
+            <div class="arsenal-chip laser-chip" id="laser-chip" hidden><span>LASER</span><b id="laser-time">0s</b></div>
+          </div>
+
           <div class="shield-badge" id="shield" hidden>◈ ESCUDO ATIVO</div>
-          <div class="desktop-hint"><span>WASD</span> ou <span>SETAS</span> para pilotar <i></i> tiro automático</div>
+          <div class="desktop-hint"><span>WASD</span> ou <span>SETAS</span> para pilotar <i></i> tiro automático <i></i> <span>B</span> bomba</div>
           <div class="mobile-hint">Arraste na tela para pilotar</div>
+        </div>
+
+        <div class="banner" id="banner" hidden aria-live="polite">
+          <strong id="banner-title"></strong>
+          <span id="banner-sub"></span>
         </div>
 
         <div class="overlay menu-overlay" id="menu-screen">
           <div class="menu-content">
             <div class="eyebrow"><span></span> MISSÃO PRONTA, PILOTO <span></span></div>
             <h1>DOMINE OS <em>CÉUS</em></h1>
-            <p class="intro">Desvie dos inimigos, destrua esquadrões e alcance a maior pontuação.</p>
+            <p class="intro">Desvie dos esquadrões, colete arsenal e derrube os <b>3 chefões</b> que dominam a órbita.</p>
             <div class="difficulty-title"><span>ESCOLHA SUA DIFICULDADE</span><i></i></div>
             <div class="difficulty-grid">
               <button class="difficulty-card" data-difficulty="facil" style="--accent:#45e6b5" aria-pressed="false">
@@ -74,7 +95,7 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M21.4 3.1c-.5-.5-1.3-.6-2-.3L3.4 9.5c-.8.3-1.1 1.1-.8 1.8.2.5.6.8 1.1.9l6.6 1.4 1.4 6.6c.2.9 1.1 1.4 2 1 .3-.2.6-.4.7-.8l7.2-15c.2-.5.1-1-.2-1.3Z" fill="currentColor"/></svg>
               INICIAR MISSÃO <span>→</span>
             </button>
-            <div class="quick-controls"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> para mover</span><i></i><span>◉ Tiro automático</span><i></i><span><kbd>P</kbd> para pausar</span></div>
+            <div class="quick-controls"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> mover</span><i></i><span>◉ Tiro automático</span><i></i><span><kbd>B</kbd> bomba</span><i></i><span><kbd>P</kbd> pausar</span></div>
           </div>
         </div>
 
@@ -92,14 +113,19 @@
             <span class="eyebrow danger">FIM DA MISSÃO</span><h2 id="gameover-title">Bom voo, piloto!</h2>
             <p>Você pilotou no modo <strong id="final-difficulty">médio</strong></p>
             <div class="result-score"><span>PONTUAÇÃO FINAL</span><strong id="final-score">0</strong><small id="new-record" hidden>★ NOVO RECORDE</small></div>
-            <div class="result-info"><span>Nível alcançado <strong id="final-level">1</strong></span><span>Recorde <strong id="best-score">0</strong></span></div>
+            <div class="result-info">
+              <span>Nível <strong id="final-level">1</strong></span>
+              <span>Abates <strong id="final-kills">0</strong></span>
+              <span>Chefões <strong id="final-bosses">0</strong></span>
+            </div>
+            <div class="result-info result-info-muted"><span>Recorde no modo <strong id="best-score">0</strong></span></div>
             <button class="primary-button" id="restart-button">↻ &nbsp; JOGAR NOVAMENTE</button>
             <button class="text-button" data-menu>Escolher outra dificuldade</button>
           </div>
         </div>
       </div>
 
-      <footer class="footer"><span><i class="cyan-dot"></i> Colete <b>+</b> vidas, <b>◈</b> escudos e <b>3×</b> tiro triplo</span><span>DESTRUA. DESVIE. SOBREVIVA.</span></footer>
+      <footer class="footer"><span><i class="cyan-dot"></i> Colete <b>+</b> vidas, <b>W</b> armas, <b>M</b> mísseis, <b>L</b> laser e <b>B</b> bombas</span><span>DESTRUA. DESVIE. SOBREVIVA.</span></footer>
     </section>
   </main>
   <noscript>Ative o JavaScript do navegador para jogar Skyforce.</noscript>
